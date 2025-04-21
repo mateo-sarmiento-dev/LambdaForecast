@@ -12,10 +12,7 @@ uvicorn[standard]
 prophet
 numpy
 pydantic
-#pmdarima
-#scikit-learn
-#statsmodels
+pmdarima
+scikit-learn
+statsmodels
 python-dateutil
-#numpy==1.24.0
-#pmdarima==2.0.3
-#plotly==5.15.0

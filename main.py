@@ -6,10 +6,20 @@ from typing import List, Dict, Optional
 from pydantic import BaseModel
 import asyncio
 from mangum import Mangum
+import os
+import logging
+from aws_lambda_powertools import Logger
+logger = Logger()
 
 app = FastAPI()
 
 # Generate a random token at startup
+
+
+# Set up logging (add this near the top of your file)
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
 API_TOKEN = '3b14bf4897ef89cd08b10a0a5dfbc206'
 print(f"Use this Auth token for API requests: {API_TOKEN}")
 
@@ -23,10 +33,12 @@ def verify_auth(auth: Optional[str] = Header(None)):
 
 @app.get("/")
 async def root():
-    return {"message": "Successful deploy!"}
+    logger.info("Root endpoint accessed")
+    return {"message": "Successful deploy-v3!"}
 
 @app.get("/add/{num1}/{num2}")
 async def add(num1: int, num2: int, auth: str = Depends(verify_auth)):
+    logger.info(f"Adding numbers: {num1} + {num2}")
     return {"total": num1 + num2}
 
 class SeriesItem(BaseModel):
@@ -44,11 +56,17 @@ class InputData(BaseModel):
     series: List[dict]
 
 async def process_forecast(request: InputData):
+    logger.info("Starting forecast processing")
     parameters = request.parameters
     series = request.series
-
+    logger.info(f"Received forecast request with parameters: {parameters}")
+    
     if not series:
+        logger.error("Empty series data received")
         raise HTTPException(status_code=400, detail="Series data is empty.")
+    
+    print(series)
+
 
     data = pd.DataFrame(series)
     data.rename(columns={"Fecha": "ds", "value": "y"}, inplace=True)
@@ -85,6 +103,12 @@ async def process_forecast(request: InputData):
 @app.post("/forecast")
 async def make_forecast(request: InputData, auth: str = Depends(verify_auth)):
     return await process_forecast(request)
+
+from appmain import process_forecastJD
+@app.post("/forecastjd")
+async def process_series(request: InputData, auth: str = Depends(verify_auth)):
+    print(request)
+    return await process_forecastJD(request)
 
 # Lambda handler (must be at module level)
 handler = Mangum(app)
