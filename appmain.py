@@ -8,8 +8,12 @@ import uvicorn
 #push demo
 import pandas as pd
 
+import warnings
+from statsmodels.tools.sm_exceptions import ValueWarning
 
 
+warnings.filterwarnings("ignore", category=ValueWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 def select_best_model(Results_All_Models):
     # Inicializar DataFrame para almacenar los mejores modelos
@@ -41,10 +45,14 @@ def select_best_model(Results_All_Models):
         group['Total_Score'] = group[['MFA_Points', 'BIAS_Points', 'MAE_Points', 'RMSE_Points']].sum(axis=1)
 
         # Encontrar el mejor y segundo mejor modelo
-        best_models_group = group.sort_values(by='Total_Score', ascending=False).head(2)
+        #best_models_group = group.sort_values(by='Total_Score', ascending=False).head(2)
+        best_models_group = group.sort_values(
+            by=['Total_Score', 'Average MAE', 'Average MFA'],
+            ascending=[False, True, True]
+        ).head(2)
         best_model = best_models_group.iloc[0]
         second_best_model = best_models_group.iloc[1] if len(best_models_group) > 1 else best_model
-
+        print(best_models_group)
         # Añadir al DataFrame de resultados
         new_row = pd.DataFrame({
             'Mejor_Modelo': [best_model['Modelo']],
@@ -62,13 +70,14 @@ def select_best_model(Results_All_Models):
             'REG': [name[0]]
         })
         best_models = pd.concat([best_models, new_row], ignore_index=True)
-
+        
     return best_models
 
 def Forecast (best_models_report, opt_params_df, df_data, TS, DF, SP, FP):
     # %%
     # DataFrame para almacenar los resultados detallados de las predicciones futuras
     future_detailed_results = pd.DataFrame()
+    print(best_models_report)
     # se define un diccionario donde se relacionan los nombres de los modelos con las funciones de los modelos.
     model_name_to_function = {
         'NAIVE' : NAIVE,
@@ -948,6 +957,7 @@ async def process_forecastJD(request: InputData):
     parameters = request.parameters
     series = request.series
     filtered_series = pd.DataFrame(series)
+    filtered_series['value']=filtered_series['value'].fillna(0)
     #filtered_series = pd.DataFrame([s.dict() for s in request.series])
     filtered_series["Fecha"] = pd.to_datetime(filtered_series["Fecha"])  # Convert Fecha to datetime
     #filtered_series = filtered_series.asfreq('MS')
@@ -1024,14 +1034,16 @@ async def process_forecastJD(request: InputData):
                 print(f"Error processing model {model_func.__name__}: {str(e)}")
 
         best_models_report = select_best_model(results_df)
-        print(results_df)
-        print(best_models_report)
-        print(detailed_results)
+        #print(results_df)
+        #print(best_models_report)
+        #print(detailed_results)
         #detailed_results.to_csv('resultadosfinales.csv')
         #results_df.to_csv('results_df.csv')
         future_fcst = Forecast (best_models_report, opt_params_df, detailed_results, ts, df, sp, fp)
         #plot_forecast_report(detailed_results)
         future_fcst['F'] = future_fcst['F'].clip(lower=0)
+        future_fcst['F']=future_fcst['F'].fillna(0)
+        print(filtered_series)
         return {
             'series': future_fcst.to_dict(orient="records")
             #,'detailed_results': detailed_results.to_dict()

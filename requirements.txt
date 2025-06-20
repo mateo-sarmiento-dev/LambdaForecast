@@ -16,3 +16,5 @@ pmdarima
 scikit-learn
 statsmodels
 python-dateutil
+aws_lambda_powertools
+neuralprophet

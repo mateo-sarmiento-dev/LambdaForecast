@@ -100,15 +100,97 @@ async def process_forecast(request: InputData):
     forecast_result = await loop.run_in_executor(None, train_model)
     return {"series": forecast_result}
 
+from neuralprophet import NeuralProphet
+from fastapi import HTTPException
+import logging
+
+logger = logging.getLogger(__name__)
+
+async def process_forecast_neural(request: InputData):
+    logger.info("Starting forecast processing")
+    parameters = request.parameters
+    series = request.series
+    logger.info(f"Received forecast request with parameters: {parameters}")
+    
+    if not series:
+        logger.error("Empty series data received")
+        raise HTTPException(status_code=400, detail="Series data is empty.")
+
+    data = pd.DataFrame(series)
+    data.rename(columns={"Fecha": "ds", "value": "y"}, inplace=True)
+
+    try:
+        data['ds'] = pd.to_datetime(data['ds'])
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+
+    # Aggregate by timestamp if needed
+    data = data.groupby('ds', as_index=False).mean()
+
+    # Log transform to stabilize variance
+    data['y'] = np.log1p(data['y'])
+
+    def train_model():
+        model = NeuralProphet(
+            n_forecasts=parameters.fp,
+            yearly_seasonality=True,
+            weekly_seasonality=False,
+            daily_seasonality=False,
+            learning_rate=0.01,
+            batch_size=32,
+            quantiles=[0.05, 0.95]
+        )
+
+        model.fit(data, freq=parameters.df, progress="off")
+
+        future = model.make_future_dataframe(data, periods=parameters.fp, n_historic_predictions=False)
+        forecast = model.predict(future)
+
+        # NeuralProphet returns multiple yhat columns (e.g., yhat1, yhat2...)
+        forecast_cols = [col for col in forecast.columns if col.startswith("yhat")]
+
+        # Convert back from log scale
+        for col in forecast_cols:
+            forecast[col] = np.expm1(forecast[col])
+            forecast[col] = forecast[col].clip(lower=0)
+
+        forecast['Fecha'] = forecast['ds']
+        forecast['F'] = forecast[forecast_cols[0]]
+
+        return forecast[['Fecha', 'F']].tail(parameters.fp).to_dict(orient="records")
+
+    loop = asyncio.get_event_loop()
+    forecast_result = await loop.run_in_executor(None, train_model)
+    return {"series": forecast_result}
+
 @app.post("/forecast")
 async def make_forecast(request: InputData, auth: str = Depends(verify_auth)):
     return await process_forecast(request)
 
+
+@app.post("/forecastNeural")
+async def make_forecast_neural(request: InputData, auth: str = Depends(verify_auth)):
+    return await process_forecast_neural(request)
+
 from appmain import process_forecastJD
+from fastapi.responses import JSONResponse
+
 @app.post("/forecastjd")
 async def process_series(request: InputData, auth: str = Depends(verify_auth)):
-    print(request)
-    return await process_forecastJD(request)
+    try:
+        print(request)
+        return await process_forecastJD(request)
+    except Exception as e:
+        logger.error(f"Unexpected error during forecastJD: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"Unexpected server error in forecastJD: {str(e)}"}
+        )
 
 # Lambda handler (must be at module level)
 handler = Mangum(app)
+
+
+#if __name__ == "__main__":
+#    import uvicorn
+#    uvicorn.run(app, host="0.0.0.0", port=8000)
